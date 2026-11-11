@@ -1,0 +1,4 @@
+data/
+backend/_pycache_/
+backend/data
+test_files/

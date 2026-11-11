@@ -1,0 +1,68 @@
+version: "3.8"
+
+services:
+  # 1. Хранилище файлов (MinIO)
+  minio:
+    image: minio/minio:latest
+    container_name: docai-minio
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web-консоль
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - ./data/minio:/data
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+
+  # 2. Векторная БД (ChromaDB) — отдельный контейнер
+  chroma:
+    image: chromadb/chroma:1.0.0
+    container_name: docai-chroma
+    ports:
+      - "8001:8000"   # Внутри контейнера 8000, наружу 8001 (чтобы не конфликтовать с backend)
+    volumes:
+      - ./data/chroma:/data
+    environment:
+      - ANONYMIZED_TELEMETRY=FALSE
+    restart: unless-stopped
+
+  # 3. Локальная LLM (Ollama) — CPU-режим
+  ollama:
+    image: ollama/ollama:latest
+    container_name: docai-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./data/ollama:/root/.ollama
+    restart: unless-stopped
+
+  # 4. Backend API
+  backend:
+    build: ./backend
+    container_name: docai-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Ollama
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: qwen2.5:3b
+      # MinIO
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: documents
+      # Chroma (HTTP-клиент)
+      CHROMA_HOST: chroma
+      CHROMA_PORT: 8000
+      # SQLite
+      METADATA_DB_PATH: /app/data/metadata.db
+    volumes:
+      - ./backend:/app
+      - ./data/app:/app/data
+    depends_on:
+      - ollama
+      - minio
+      - chroma
+    restart: unless-stopped
