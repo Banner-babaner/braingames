@@ -20,24 +20,33 @@ def _embed(text: str) -> list[float]:
     resp = ollama_client.embeddings(model=EMBED_MODEL, prompt=text)
     return resp["embedding"]
 
-def index_chunks(doc_id: str, chunks: list[str]):
+def index_chunks(doc_id: str, chunks: list[str], owner_id: str = "demo-user"):
     if not chunks:
         return 0
     ids = [f"{doc_id}-{i}" for i in range(len(chunks))]
     embeddings = [_embed(c) for c in chunks]
-    # ВАЖНО: сохраняем doc_id в метаданные чанка
-    metadatas = [{"doc_id": doc_id} for _ in chunks]
+    # owner_id в метаданных — основа изоляции поиска
+    metadatas = [{"doc_id": doc_id, "owner_id": owner_id} for _ in chunks]
     collection.add(ids=ids, documents=chunks, embeddings=embeddings, metadatas=metadatas)
     return len(chunks)
 
-def search(question: str, doc_id: str = None, n_results: int = 3) -> list[str]:
+def search(question: str, doc_id: str = None, owner_id: str = None,
+           n_results: int = 3) -> list[str]:
     q_emb = _embed(question)
-    
-    # Фильтр по конкретному документу, если он передан
-    where_filter = {"doc_id": doc_id} if doc_id else None
-    
+
+    conditions = []
+    if owner_id:
+        conditions.append({"owner_id": owner_id})
+    if doc_id:
+        conditions.append({"doc_id": doc_id})
+    where_filter = None
+    if len(conditions) == 1:
+        where_filter = conditions[0]
+    elif len(conditions) > 1:
+        where_filter = {"$and": conditions}
+
     results = collection.query(
-        query_embeddings=[q_emb], 
+        query_embeddings=[q_emb],
         n_results=n_results,
         where=where_filter
     )
